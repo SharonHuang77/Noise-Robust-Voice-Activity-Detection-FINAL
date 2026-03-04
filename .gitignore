@@ -1,0 +1,8 @@
+# Ignore the actual data
+data/raw/LibriSpeech/
+data/raw/musan/
+data/raw/*.tar.gz
+
+# Ignore python environment
+.venv/
+__pycache__/

@@ -1,0 +1,17 @@
+# Audio Processing
+torchaudio
+librosa
+soundfile
+
+# Core Machine Learning
+torch
+numpy
+scipy
+
+# Utilities & Visualization
+matplotlib
+tqdm
+python-dotenv
+
+# Optional: For specialized VAD models or features
+webrtcvad  # High-performance lightweight VAD
