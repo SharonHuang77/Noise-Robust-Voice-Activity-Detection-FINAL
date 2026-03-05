@@ -16,8 +16,8 @@ Key idea:
 - We create speech/non-speech transitions by inserting silences between utterances.
 - Labels are derived from known boundaries (NOT energy-based).
 
-Example usage:
-  python3 src/02_generation_generate_sequences.py \
+Example usage with Mac/Linux:
+  python3 src/02_generation/generate_sequences.py \
     --split train \
     --librispeech_root data/raw/LibriSpeech \
     --librispeech_index data/indexes/librispeech_train_clean_100.jsonl \
@@ -25,7 +25,17 @@ Example usage:
     --num_examples 2000 \
     --seed 1337
 
-For dev/test:
+Exmaple usage with Windows PowerShell:
+    python src\02_generation\generate_sequences.py `
+    --split train `
+    --librispeech_root data/raw/LibriSpeech `
+    --librispeech_index data/indexes/librispeech_train_clean_100.jsonl `
+    --out_dir data/generated/train `
+    --num_examples 2000 `
+    --seed 1337
+
+For dev:
+Example usage with Mac/Linux:
   python3 src/02_generation_generate_sequences.py \
     --split dev \
     --librispeech_root data/raw/LibriSpeech \
@@ -33,6 +43,35 @@ For dev/test:
     --out_dir data/generated/dev \
     --num_examples 200 \
     --seed 1337
+
+Exmaple usage with Windows PowerShell:
+    python src\02_generation\generate_sequences.py `
+    --split dev `
+    --librispeech_root data/raw/LibriSpeech `
+    --librispeech_index data/indexes/librispeech_dev_clean.jsonl `
+    --out_dir data/generated/dev `
+    --num_examples 200 `
+    --seed 1337
+
+For test:
+Example usage with Mac/Linux:
+  python3 src/02_generation_generate_sequences.py \
+    --split dev \
+    --librispeech_root data/raw/LibriSpeech \
+    --librispeech_index data/indexes/librispeech_test_clean.jsonl \
+    --out_dir data/generated/test
+    --num_examples 200 \
+    --seed 1337
+
+Exmaple usage with Windows PowerShell:
+    python src\02_generation\generate_sequences.py `
+    --split dev `
+    --librispeech_root data/raw/LibriSpeech `
+    --librispeech_index data/indexes/librispeech_test_clean.jsonl `
+    --out_dir data/generated/test `
+    --num_examples 200 `
+    --seed 1337
+
 """
 
 from __future__ import annotations

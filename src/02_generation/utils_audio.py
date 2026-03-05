@@ -35,4 +35,4 @@ def load_audio_standardized(
     if mx > peak and mx > 0:
         x = x * (peak / mx)
 
-    return x, target_sr
+    return x

@@ -8,10 +8,17 @@ cd Noise-Robust-Voice-Activity-Detection
 
 ### 2. Environment Setup
 
+With Linux/Mac:
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt 
+```
+
+With PC:
+```Powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+.\.venv\Scripts\Activate.ps1
 ```
 
 ### 3. Data Acquisition
@@ -44,3 +51,18 @@ python src/01_indexing/make_indexes.py \
   --out_dir data/indexes \
   --ls_splits train-clean-100 dev-clean test-clean test-other
 ```
+
+### 5. Construct labeled VAD sequences
+
+Run the generation script to create the manifest with labeled VAD sequences:
+
+From Linux/Mac:
+```bash
+./scripts/02_generation.sh
+```
+
+From PC:
+```Powershell
+.\scripts\02_generation.ps1
+```
+

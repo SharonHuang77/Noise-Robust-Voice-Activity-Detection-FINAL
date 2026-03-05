@@ -3,6 +3,9 @@ data/raw/LibriSpeech/
 data/raw/musan/
 data/raw/*.tar.gz
 
+# Generated datasets
+data/generated/
+
 # Ignore python environment
 .venv/
 __pycache__/

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
 import numpy as np
 
-from .utils_audio import load_audio_standardized
+from utils_audio import load_audio_standardized
 
 
 @dataclass
@@ -14,15 +14,15 @@ class SeqParams:
     n_min: int = 2
     n_max: int = 6
 
-    gap_min_s: float = 0.2
-    gap_max_s: float = 1.0
+    gap_min_s: float = 0.5
+    gap_max_s: float = 2.0
 
-    leadtrail_min_s: float = 0.2
-    leadtrail_max_s: float = 0.6
-    lead_prob: float = 0.5
-    trail_prob: float = 0.5
+    leadtrail_min_s: float = 0.3
+    leadtrail_max_s: float = 1.0
+    lead_prob: float = 1.0
+    trail_prob: float = 1.0
 
-    max_utt_s: Optional[float] = None  # optional cap per utterance length
+    max_utt_s: float = 4.0  #cap per utterance length
 
 
 def _zeros_s(duration_s: float, sr: int) -> np.ndarray:
