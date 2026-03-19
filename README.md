@@ -62,3 +62,9 @@ Mixes clean speech segments with noise from MUSAN at various SNR levels to creat
 ```bash
 ./scripts/03_add_noise.sh
 ```
+
+### 6. Extract Features
+Extracts log-mel + delta + delta-delta + log-energy features from the generated audio files for model training and evaluation.
+```bash
+./scripts/04_extract_features.sh
+```
