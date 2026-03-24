@@ -2,8 +2,8 @@
 
 ### 1. Clone the Repository
 ```bash
-git clone <your-repository-url>
-cd Noise-Robust-Voice-Activity-Detection
+git clone https://github.com/SharonHuang77/Noise-Robust-Voice-Activity-Detection-FINAL.git
+cd Noise-Robust-Voice-Activity-Detection-FINAL
 ```
 
 ### 2. Data Acquisition
