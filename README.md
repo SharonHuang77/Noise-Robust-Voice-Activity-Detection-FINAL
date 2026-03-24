@@ -40,6 +40,12 @@ docker run -it --rm -v $(pwd):/app vad-project
 
 ### 5. Run the Data Pipeline
 
+Before running the shell scripts, make sure they are executable:
+
+```bash
+chmod +x scripts/*.sh
+```
+
 Step 5.1: Create Index Files
 Scans LibriSpeech and MUSAN directories to create index files that list all audio files and their metadata.
 

@@ -52,9 +52,12 @@ def read_duration_seconds(path: Path) -> Optional[float]:
 
 def iter_audio_files(root: Path, exts: Optional[set[str]] = None) -> Iterable[Path]:
     exts = exts or SUPPORTED_AUDIO_EXTS
-    for p in root.rglob("*"):
-        if p.is_file() and p.suffix.lower() in exts:
-            yield p
+    files = [
+        p for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() in exts
+    ]
+    for p in sorted(files, key=lambda x: x.relative_to(root).as_posix()):
+        yield p
 
 
 def write_jsonl(records: Iterable[Dict], out_path: Path) -> int:
