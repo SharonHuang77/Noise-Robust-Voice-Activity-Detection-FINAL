@@ -50,7 +50,7 @@ Step 5.1: Create Index Files
 Scans LibriSpeech and MUSAN directories to create index files that list all audio files and their metadata.
 
 ```bash
-python src/01_indexing/make_indexes.py \
+python3 src/01_indexing/make_indexes.py \
   --librispeech_root data/raw/LibriSpeech \
   --musan_root data/raw/musan \
   --out_dir data/indexes \
@@ -71,6 +71,44 @@ Mixes clean speech segments with noise from MUSAN at various SNR levels to creat
 
 ### 6. Extract Features
 Extracts log-mel + delta + delta-delta + log-energy features from the generated audio files for model training and evaluation.
+
+By default, this extracts **noisy** features:
 ```bash
 ./scripts/04_extract_features.sh
 ```
+
+For baseline training, you also need **clean** features:
+```bash
+MANIFEST_TYPE=clean ./scripts/04_extract_features.sh
+```
+
+This will create `train_clean_features_manifest.jsonl` (plus dev/test versions) needed for Step 7.
+
+### 7. Train Baseline MLP
+Trains a baseline MLP model for frame-level voice activity detection on clean LibriSpeech speech.
+- Architecture: 1331 → 512 → 256 → 1 (binary classification)
+- Features: 1331-dim stacked (5 left + 121 center + 5 right frames)
+- Default: 5 epochs, batch size 2048, learning rate 0.001
+
+```bash
+RUN_SWEEP=1 ./scripts/05_baseline_training.sh
+```
+
+Optional custom sweep in one command:
+```bash
+RUN_SWEEP=1 LR_LIST=0.001,0.0003 WD_LIST=0,1e-5,1e-4 DROPOUT_LIST=0.0,0.1 SEED_LIST=42,1337 EPOCHS=5 BATCH_SIZE=2048 ./scripts/05_baseline_training.sh
+```
+
+Faster tuning (use only a fraction of train/dev frames):
+```bash
+RUN_SWEEP=1 TRAIN_FRACTION=0.20 DEV_FRACTION=0.30 EPOCHS=2 SEED_LIST=42 ./scripts/05_baseline_training.sh
+```
+
+Single-run with reduced data:
+```bash
+TRAIN_FRACTION=0.25 DEV_FRACTION=0.25 ./scripts/05_baseline_training.sh
+```
+
+Notes:
+- `TRAIN_FRACTION` and `DEV_FRACTION` must be in `(0, 1]`.
+- Use reduced fractions for quick search, then retrain top settings with `TRAIN_FRACTION=1.0 DEV_FRACTION=1.0`.
