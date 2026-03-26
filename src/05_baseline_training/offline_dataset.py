@@ -33,7 +33,7 @@ def read_jsonl(path: Path) -> List[Dict]:
 
 class OfflineFrameDataset(Dataset):
     """
-    Clean-only frame-level dataset from offline stacked features.
+    Frame-level dataset from offline stacked features.
 
     Each item is one frame after context stacking:
       - X: shape (1331,)
@@ -44,25 +44,30 @@ class OfflineFrameDataset(Dataset):
         self,
         generated_dir: str | Path,
         split: str,
+        manifest_type: str = "clean",
         expected_dim: int = 1331,
     ) -> None:
         super().__init__()
 
         if split not in {"train", "dev", "test"}:
             raise ValueError(f"split must be train/dev/test, got: {split}")
+        if manifest_type not in {"clean", "noisy"}:
+            raise ValueError(f"manifest_type must be clean/noisy, got: {manifest_type}")
 
         self.generated_dir = Path(generated_dir).expanduser().resolve()
         self.split = split
         self.expected_dim = expected_dim
-        self.manifest_type = "clean"
+        self.manifest_type = manifest_type
 
         self.feature_manifest = (
-            self.generated_dir / "features" / f"{self.split}_clean_features_manifest.jsonl"
+            self.generated_dir
+            / "features"
+            / f"{self.split}_{self.manifest_type}_features_manifest.jsonl"
         )
         if not self.feature_manifest.exists():
             raise FileNotFoundError(
-                f"Missing clean feature manifest: {self.feature_manifest}. "
-                "Extract clean stacked features first."
+                f"Missing {self.manifest_type} feature manifest: {self.feature_manifest}. "
+                f"Extract {self.manifest_type} stacked features first."
             )
 
         raw_rows = read_jsonl(self.feature_manifest)
@@ -171,12 +176,14 @@ def build_dataloader(
     generated_dir: str | Path,
     split: str,
     batch_size: int,
+    manifest_type: str = "clean",
     shuffle: bool = False,
     num_workers: int = 4,
 ) -> DataLoader:
     dataset = OfflineFrameDataset(
         generated_dir=generated_dir,
         split=split,
+        manifest_type=manifest_type,
     )
     return DataLoader(
         dataset,
@@ -188,9 +195,10 @@ def build_dataloader(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Quick sanity check for clean OfflineFrameDataset")
+    parser = argparse.ArgumentParser(description="Quick sanity check for OfflineFrameDataset")
     parser.add_argument("--generated_dir", required=True, type=str)
     parser.add_argument("--split", default="train", choices=["train", "dev", "test"])
+    parser.add_argument("--manifest_type", default="clean", choices=["clean", "noisy"])
     parser.add_argument("--batch_size", default=64, type=int)
     return parser.parse_args()
 
@@ -200,6 +208,7 @@ def main() -> None:
     loader = build_dataloader(
         generated_dir=args.generated_dir,
         split=args.split,
+        manifest_type=args.manifest_type,
         batch_size=args.batch_size,
         shuffle=False,
     )

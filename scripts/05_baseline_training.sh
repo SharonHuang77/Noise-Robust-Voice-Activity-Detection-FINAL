@@ -70,7 +70,6 @@ run_one() {
   local save_path="$5"
 
   mkdir -p "$(dirname "$save_path")"
-
   echo "----------------------------------------"
   echo "Run config"
   echo "  lr=$lr wd=$wd dropout=$dr seed=$seed"

@@ -12,7 +12,7 @@ class BaselineMLP(nn.Module):
     def __init__(
         self,
         input_dim: int = 1331,
-        hidden_dims=(1024, 512, 256),
+        hidden_dims=(512, 256),
         dropout: float = 0.1,
     ) -> None:
         super().__init__()
