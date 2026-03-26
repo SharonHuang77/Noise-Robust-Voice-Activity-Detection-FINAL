@@ -1,0 +1,19 @@
+{
+  "run_name": "baseline_mlp_noisy",
+  "device": "cpu",
+  "manifest_type": "noisy",
+  "input_dim": 1331,
+  "hidden_dim": 256,
+  "batch_size": 512,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0,
+  "epochs": 10,
+  "best_epoch": 10,
+  "best_dev_f1": 0.8813536568753837,
+  "final_test_metrics": {
+    "loss": 0.3312069245771652,
+    "f1": 0.889618122391947,
+    "far": 0.28563249751760045,
+    "miss_rate": 0.09667093469910372
+  }
+}

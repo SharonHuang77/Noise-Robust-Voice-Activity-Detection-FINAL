@@ -74,3 +74,12 @@ Extracts log-mel + delta + delta-delta + log-energy features from the generated 
 ```bash
 ./scripts/04_extract_features.sh
 ```
+```bash
+chmod +x scripts/05_dataset_check.sh
+./scripts/05_dataset_check.sh
+```
+
+```bash
+chmod +x scripts/06_baseline_training.sh
+./scripts/06_baseline_training.sh
+```
