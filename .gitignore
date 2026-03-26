@@ -9,3 +9,16 @@ data/generated/
 # Ignore python environment
 .venv/
 __pycache__/
+
+# Ignore artifacts by default
+artifacts/*
+
+# Ignore large training/evaluation artifacts
+artifacts/checkpoints/
+artifacts/eval_outputs*/
+artifacts/**/*.npy
+
+# Keep small reproducibility configs
+!artifacts/final_tuned_config.json
+!artifacts/final_tuned_config_clean.json
+!artifacts/final_tuned_config_noisy.json
