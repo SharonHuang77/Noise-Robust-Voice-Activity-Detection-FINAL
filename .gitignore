@@ -22,3 +22,12 @@ artifacts/**/*.npy
 !artifacts/final_tuned_config.json
 !artifacts/final_tuned_config_clean.json
 !artifacts/final_tuned_config_noisy.json
+
+# OS / system files
+.DS_Store
+
+# Training outputs (very important)
+outputs/
+
+# Python cache
+*.pyc
