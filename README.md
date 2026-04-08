@@ -112,3 +112,5 @@ TRAIN_FRACTION=0.25 DEV_FRACTION=0.25 ./scripts/05_baseline_training.sh
 Notes:
 - `TRAIN_FRACTION` and `DEV_FRACTION` must be in `(0, 1]`.
 - Use reduced fractions for quick search, then retrain top settings with `TRAIN_FRACTION=1.0 DEV_FRACTION=1.0`.
+
+### 8. Lazy feature extraction
