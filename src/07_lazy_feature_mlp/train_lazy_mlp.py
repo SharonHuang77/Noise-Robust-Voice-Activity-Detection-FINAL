@@ -11,12 +11,18 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, Subset
 
 try:
-    from .baseline_mlp import BaselineMLP
-    from .offline_dataset import build_dataloader
+    from .lazy_frame_dataset import VADLazyFrameDataset
 except ImportError:
-    # Supports running as a direct script: python src/05_baseline_training/train_baseline_mlp.py
-    from baseline_mlp import BaselineMLP
-    from offline_dataset import build_dataloader
+    from lazy_frame_dataset import VADLazyFrameDataset
+
+# Robust import
+import sys
+
+current_dir = Path(__file__).parent
+baseline_dir = current_dir.parent / "05_baseline_training"
+if str(baseline_dir) not in sys.path:
+    sys.path.insert(0, str(baseline_dir))
+from baseline_mlp import BaselineMLP
 
 
 @dataclass
@@ -46,18 +52,20 @@ def run_epoch(
 
     print(f"Entering {'train' if is_train else 'dev'} epoch with {len(loader)} batches")
 
-    for batch_idx, (x, y) in enumerate(loader):
+    for batch_idx, batch in enumerate(loader):
         if batch_idx % 100 == 0:
             print(f"Loaded batch {batch_idx}/{len(loader)}")
 
-        x = x.to(device, non_blocking=True)
-        y = y.to(device, non_blocking=True)
+        x = batch["x"].to(device, non_blocking=True)
+        y = batch["y"].to(device, non_blocking=True)
 
         if is_train:
             optimizer.zero_grad(set_to_none=True)
 
         with torch.set_grad_enabled(is_train):
             logits = model(x)
+            if logits.ndim > 1:
+                logits = logits.squeeze(-1)
             loss = criterion(logits, y)
 
             if is_train:
@@ -79,9 +87,10 @@ def run_epoch(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train Step 05 offline MLP")
+    parser = argparse.ArgumentParser(description="Train Step 07 lazy MLP")
     parser.add_argument("--data_root", type=str, required=True, help="Path to data/generated")
     parser.add_argument("--manifest_type", type=str, default="clean", choices=["clean", "noisy"])
+    parser.add_argument("--norm_stats_path", type=str, default="", help="Path to norm stats .npz file")
     parser.add_argument("--batch_size", type=int, default=2048)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -92,6 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train_fraction", type=float, default=1.0)
     parser.add_argument("--dev_fraction", type=float, default=1.0)
+    parser.add_argument("--save_every", type=int, default=1)
     return parser.parse_args()
 
 
@@ -104,30 +114,41 @@ def seed_everything(seed: int) -> None:
 def build_loaders(
     data_root: str | Path,
     manifest_type: str,
+    norm_stats_path: str,
     batch_size: int,
     num_workers: int,
     train_fraction: float,
     dev_fraction: float,
     seed: int,
 ) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
-    train_dir = Path(data_root) / "train"
-    dev_dir = Path(data_root) / "dev"
-
-    train_loader = build_dataloader(
-        generated_dir=train_dir,
+    train_dataset = VADLazyFrameDataset(
+        generated_dir=data_root,
         split="train",
         manifest_type=manifest_type,
+        norm_stats_path=norm_stats_path or None,
+    )
+    dev_dataset = VADLazyFrameDataset(
+        generated_dir=data_root,
+        split="dev",
+        manifest_type=manifest_type,
+        norm_stats_path=norm_stats_path or None,
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
+        pin_memory=True,
+        drop_last=True,
     )
-    dev_loader = build_dataloader(
-        generated_dir=dev_dir,
-        split="dev",
-        manifest_type=manifest_type,
+    dev_loader = DataLoader(
+        dev_dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
+        pin_memory=True,
+        drop_last=False,
     )
 
     train_loader = maybe_subsample_loader(
@@ -189,6 +210,21 @@ def maybe_save_model(model: nn.Module, save_path: str) -> None:
     print(f"Saved model checkpoint: {path}")
 
 
+def checkpoint_path_for_epoch(save_path: str, epoch: int) -> str:
+    base_path = Path(save_path)
+    return str(base_path.with_name(f"{base_path.stem}_epoch{epoch:02d}{base_path.suffix}"))
+
+
+def checkpoint_path_for_best(save_path: str) -> str:
+    base_path = Path(save_path)
+    return str(base_path.with_name(f"{base_path.stem}_best{base_path.suffix}"))
+
+
+def checkpoint_path_for_final(save_path: str) -> str:
+    base_path = Path(save_path)
+    return str(base_path.with_name(f"{base_path.stem}_final{base_path.suffix}"))
+
+
 def main() -> None:
     args = parse_args()
     seed_everything(args.seed)
@@ -198,6 +234,7 @@ def main() -> None:
     train_loader, dev_loader = build_loaders(
         data_root=args.data_root,
         manifest_type=args.manifest_type,
+        norm_stats_path=args.norm_stats_path,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         train_fraction=args.train_fraction,
@@ -209,8 +246,15 @@ def main() -> None:
     criterion = nn.BCEWithLogitsLoss()
     optimizer = Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
+    default_save = (
+        Path("artifacts")
+        / "checkpoints"
+        / f"lazy_mlp_{args.manifest_type}_lr{args.lr}_wd{args.weight_decay}_dr{args.dropout}_seed{args.seed}.pt"
+    )
+    resolved_save_path = args.save_path if args.save_path else str(default_save)
+
     print("=" * 70)
-    print(f"Step 05 Offline MLP Training ({args.manifest_type.capitalize()} Features)")
+    print(f"Step 07 Lazy MLP Training ({args.manifest_type.capitalize()} Features)")
     print(f"Device: {device}")
     print(f"Train frames: {len(train_loader.dataset)} | Dev frames: {len(dev_loader.dataset)}")
     print("=" * 70)
@@ -227,9 +271,14 @@ def main() -> None:
             f"dev_loss={dev_metrics.loss:.6f} dev_acc={dev_metrics.accuracy:.4f}"
         )
 
+        if args.save_every > 0 and (epoch % args.save_every == 0):
+            maybe_save_model(model, checkpoint_path_for_epoch(resolved_save_path, epoch))
+
         if dev_metrics.loss < best_dev_loss:
             best_dev_loss = dev_metrics.loss
-            maybe_save_model(model, args.save_path)
+            maybe_save_model(model, checkpoint_path_for_best(resolved_save_path))
+
+    maybe_save_model(model, checkpoint_path_for_final(resolved_save_path))
 
     print("Training finished.")
 
