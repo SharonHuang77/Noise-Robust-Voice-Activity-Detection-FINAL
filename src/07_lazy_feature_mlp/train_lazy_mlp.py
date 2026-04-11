@@ -1,34 +1,33 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+import json
 from pathlib import Path
-from typing import Tuple
+from typing import Dict, Tuple
 
 import torch
 from torch import nn
 from torch.optim import Adam
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 
-try:
-    from .lazy_frame_dataset import VADLazyFrameDataset
-except ImportError:
-    from lazy_frame_dataset import VADLazyFrameDataset
-
-# Robust import
+# Robust imports
 import sys
-
+from pathlib import Path
 current_dir = Path(__file__).parent
 baseline_dir = current_dir.parent / "05_baseline_training"
 if str(baseline_dir) not in sys.path:
     sys.path.insert(0, str(baseline_dir))
 from baseline_mlp import BaselineMLP
 
-
-@dataclass
-class EpochMetrics:
-    loss: float
-    accuracy: float
+# Import lazy frame dataset
+try:
+    from .lazy_frame_dataset import VADLazyFrameDataset
+except ImportError:
+    # Direct script mode
+    lazy_dir = current_dir
+    if str(lazy_dir) not in sys.path:
+        sys.path.insert(0, str(lazy_dir))
+    from lazy_frame_dataset import VADLazyFrameDataset
 
 
 def binary_accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> float:
@@ -38,11 +37,11 @@ def binary_accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> f
 
 def run_epoch(
     model: nn.Module,
-    loader: torch.utils.data.DataLoader,
+    loader: DataLoader,
     criterion: nn.Module,
     device: torch.device,
     optimizer: Adam | None,
-) -> EpochMetrics:
+) -> Dict[str, float]:
     is_train = optimizer is not None
     model.train(is_train)
 
@@ -50,12 +49,7 @@ def run_epoch(
     total_correct = 0.0
     total_frames = 0
 
-    print(f"Entering {'train' if is_train else 'dev'} epoch with {len(loader)} batches")
-
     for batch_idx, batch in enumerate(loader):
-        if batch_idx % 100 == 0:
-            print(f"Loaded batch {batch_idx}/{len(loader)}")
-
         x = batch["x"].to(device, non_blocking=True)
         y = batch["y"].to(device, non_blocking=True)
 
@@ -63,9 +57,7 @@ def run_epoch(
             optimizer.zero_grad(set_to_none=True)
 
         with torch.set_grad_enabled(is_train):
-            logits = model(x)
-            if logits.ndim > 1:
-                logits = logits.squeeze(-1)
+            logits = model(x).squeeze(-1)
             loss = criterion(logits, y)
 
             if is_train:
@@ -78,60 +70,39 @@ def run_epoch(
         total_frames += batch_size
 
     if total_frames == 0:
-        return EpochMetrics(loss=0.0, accuracy=0.0)
+        return {"loss": 0.0, "accuracy": 0.0}
 
-    return EpochMetrics(
-        loss=total_loss / total_frames,
-        accuracy=total_correct / total_frames,
-    )
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train Step 07 lazy MLP")
-    parser.add_argument("--data_root", type=str, required=True, help="Path to data/generated")
-    parser.add_argument("--manifest_type", type=str, default="clean", choices=["clean", "noisy"])
-    parser.add_argument("--norm_stats_path", type=str, default="", help="Path to norm stats .npz file")
-    parser.add_argument("--batch_size", type=int, default=2048)
-    parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight_decay", type=float, default=1e-5)
-    parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument("--save_path", type=str, default="")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--train_fraction", type=float, default=1.0)
-    parser.add_argument("--dev_fraction", type=float, default=1.0)
-    parser.add_argument("--save_every", type=int, default=1)
-    return parser.parse_args()
+    return {
+        "loss": total_loss / total_frames,
+        "accuracy": total_correct / total_frames,
+    }
 
 
-def seed_everything(seed: int) -> None:
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-
-def build_loaders(
-    data_root: str | Path,
+def build_dataloaders(
+    generated_dir: str | Path,
+    norm_stats_path: str | Path | None,
     manifest_type: str,
-    norm_stats_path: str,
+    train_subset_fraction: float | None,
+    dev_subset_fraction: float | None,
     batch_size: int,
     num_workers: int,
-    train_fraction: float,
-    dev_fraction: float,
     seed: int,
-) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+) -> Tuple[DataLoader, DataLoader]:
     train_dataset = VADLazyFrameDataset(
-        generated_dir=data_root,
+        generated_dir=generated_dir,
         split="train",
         manifest_type=manifest_type,
-        norm_stats_path=norm_stats_path or None,
+        norm_stats_path=norm_stats_path,
+        subset_fraction=train_subset_fraction,
+        subset_seed=seed,
     )
     dev_dataset = VADLazyFrameDataset(
-        generated_dir=data_root,
+        generated_dir=generated_dir,
         split="dev",
         manifest_type=manifest_type,
-        norm_stats_path=norm_stats_path or None,
+        norm_stats_path=norm_stats_path,
+        subset_fraction=dev_subset_fraction,
+        subset_seed=seed + 1,
     )
 
     train_loader = DataLoader(
@@ -151,136 +122,110 @@ def build_loaders(
         drop_last=False,
     )
 
-    train_loader = maybe_subsample_loader(
-        loader=train_loader,
-        fraction=train_fraction,
-        seed=seed,
-        shuffle=True,
-        name="train",
-    )
-    dev_loader = maybe_subsample_loader(
-        loader=dev_loader,
-        fraction=dev_fraction,
-        seed=seed + 1,
-        shuffle=False,
-        name="dev",
-    )
-
     return train_loader, dev_loader
 
 
-def maybe_subsample_loader(
-    loader: DataLoader,
-    fraction: float,
-    seed: int,
-    shuffle: bool,
-    name: str,
-) -> DataLoader:
-    if not (0.0 < fraction <= 1.0):
-        raise ValueError(f"{name}_fraction must be in (0, 1], got {fraction}")
-
-    if fraction >= 1.0:
-        return loader
-
-    total = len(loader.dataset)
-    keep = max(1, int(total * fraction))
-
-    generator = torch.Generator().manual_seed(seed)
-    indices = torch.randperm(total, generator=generator)[:keep].tolist()
-    subset = Subset(loader.dataset, indices)
-
-    print(f"Using {name} subset: {keep}/{total} frames ({fraction:.2%})")
-
-    return DataLoader(
-        subset,
-        batch_size=loader.batch_size,
-        shuffle=shuffle,
-        num_workers=loader.num_workers,
-        pin_memory=loader.pin_memory,
-        drop_last=loader.drop_last,
-    )
-
-
-def maybe_save_model(model: nn.Module, save_path: str) -> None:
-    if not save_path:
-        return
-    path = Path(save_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), path)
-    print(f"Saved model checkpoint: {path}")
-
-
-def checkpoint_path_for_epoch(save_path: str, epoch: int) -> str:
-    base_path = Path(save_path)
-    return str(base_path.with_name(f"{base_path.stem}_epoch{epoch:02d}{base_path.suffix}"))
-
-
-def checkpoint_path_for_best(save_path: str) -> str:
-    base_path = Path(save_path)
-    return str(base_path.with_name(f"{base_path.stem}_best{base_path.suffix}"))
-
-
-def checkpoint_path_for_final(save_path: str) -> str:
-    base_path = Path(save_path)
-    return str(base_path.with_name(f"{base_path.stem}_final{base_path.suffix}"))
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train Stage 2 Lazy MLP")
+    parser.add_argument("--generated_dir", type=str, required=True, help="Path to data/generated")
+    parser.add_argument("--norm_stats_path", type=str, help="Path to norm stats .npz file")
+    parser.add_argument("--manifest_type", type=str, default="noisy", choices=["clean", "noisy"])
+    parser.add_argument("--train_subset_fraction", type=float, help="Fraction of train examples")
+    parser.add_argument("--dev_subset_fraction", type=float, help="Fraction of dev examples")
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=2048)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight_decay", type=float, default=1e-5)
+    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--output_dir", type=str, default="outputs/stage2_lazy_mlp")
+    return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    seed_everything(args.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Set device
+    if args.device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(args.device)
 
-    train_loader, dev_loader = build_loaders(
-        data_root=args.data_root,
-        manifest_type=args.manifest_type,
+    # Set seed
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save training arguments
+    args_path = output_dir / "train_args.json"
+    with open(args_path, "w") as f:
+        json.dump(vars(args), f, indent=2)
+
+    # Build dataloaders
+    train_loader, dev_loader = build_dataloaders(
+        generated_dir=args.generated_dir,
         norm_stats_path=args.norm_stats_path,
+        manifest_type=args.manifest_type,
+        train_subset_fraction=args.train_subset_fraction,
+        dev_subset_fraction=args.dev_subset_fraction,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        train_fraction=args.train_fraction,
-        dev_fraction=args.dev_fraction,
         seed=args.seed,
     )
 
-    model = BaselineMLP(input_dim=1331, hidden_dims=(512, 256), dropout=args.dropout).to(device)
-    criterion = nn.BCEWithLogitsLoss()
+    # Build model
+    model = BaselineMLP(
+        input_dim=1331,
+        hidden_dims=(512, 256),
+        dropout=args.dropout,
+    ).to(device)
+
+    # Optimizer and criterion
     optimizer = Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    criterion = nn.BCEWithLogitsLoss()
 
-    default_save = (
-        Path("artifacts")
-        / "checkpoints"
-        / f"lazy_mlp_{args.manifest_type}_lr{args.lr}_wd{args.weight_decay}_dr{args.dropout}_seed{args.seed}.pt"
-    )
-    resolved_save_path = args.save_path if args.save_path else str(default_save)
+    # Training history
+    history = {"train": [], "dev": []}
 
-    print("=" * 70)
-    print(f"Step 07 Lazy MLP Training ({args.manifest_type.capitalize()} Features)")
-    print(f"Device: {device}")
-    print(f"Train frames: {len(train_loader.dataset)} | Dev frames: {len(dev_loader.dataset)}")
-    print("=" * 70)
+    best_dev_accuracy = 0.0
+    best_epoch = 0
+    best_checkpoint_path = output_dir / "best_model.pt"
 
-    best_dev_loss = float("inf")
+    print(f"Starting training for {args.epochs} epochs on {device}")
+    print(f"Train batches: {len(train_loader)}, Dev batches: {len(dev_loader)}")
 
     for epoch in range(1, args.epochs + 1):
+        # Train
         train_metrics = run_epoch(model, train_loader, criterion, device, optimizer)
-        dev_metrics = run_epoch(model, dev_loader, criterion, device, optimizer=None)
+        history["train"].append(train_metrics)
 
-        print(
-            f"[Epoch {epoch:02d}/{args.epochs:02d}] "
-            f"train_loss={train_metrics.loss:.6f} train_acc={train_metrics.accuracy:.4f} | "
-            f"dev_loss={dev_metrics.loss:.6f} dev_acc={dev_metrics.accuracy:.4f}"
-        )
+        # Evaluate
+        dev_metrics = run_epoch(model, dev_loader, criterion, device, None)
+        history["dev"].append(dev_metrics)
 
-        if args.save_every > 0 and (epoch % args.save_every == 0):
-            maybe_save_model(model, checkpoint_path_for_epoch(resolved_save_path, epoch))
+        print(f"Epoch {epoch:2d}: Train Loss={train_metrics['loss']:.4f}, Acc={train_metrics['accuracy']:.4f} | "
+              f"Dev Loss={dev_metrics['loss']:.4f}, Acc={dev_metrics['accuracy']:.4f}")
 
-        if dev_metrics.loss < best_dev_loss:
-            best_dev_loss = dev_metrics.loss
-            maybe_save_model(model, checkpoint_path_for_best(resolved_save_path))
+        # Save best model
+        if dev_metrics["accuracy"] > best_dev_accuracy:
+            best_dev_accuracy = dev_metrics["accuracy"]
+            best_epoch = epoch
+            torch.save(model.state_dict(), best_checkpoint_path)
+            print(f"  Saved best model with dev acc {best_dev_accuracy:.4f}")
 
-    maybe_save_model(model, checkpoint_path_for_final(resolved_save_path))
+    # Save history
+    history_path = output_dir / "training_history.json"
+    with open(history_path, "w") as f:
+        json.dump(history, f, indent=2)
 
-    print("Training finished.")
+    print(f"Training complete. Best dev accuracy: {best_dev_accuracy:.4f} at epoch {best_epoch}")
+    print(f"Outputs saved to: {output_dir}")
 
 
 if __name__ == "__main__":

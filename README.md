@@ -133,23 +133,31 @@ RUN_SWEEP=1 ./scripts/06_noisy_offline_mlp_training.sh
 - Checkpoints are saved to `artifacts/checkpoints/` with naming pattern: `noisy_mlp_lr<lr>_wd<wd>_dr<dropout>_seed<seed>.pt`.
 
 ### 9. Train Lazy Feature MLP
-Trains the lazy MLP pipeline where features are computed on-the-fly from generated audio and labels.
-- Architecture: 1331 → 512 → 256 → 1 (binary classification)
-- Features: 1331-dim stacked context frames created lazily at load time
-- Default: 5 epochs, batch size 2048, learning rate 0.001
+
+Train the lazy feature model (on-the-fly frame extraction + context stacking) with:
+
+```bash
+./scripts/07_lazy_feature_mlp_training.sh
+```
 
 #### Quick Search (with reduced data)
-Use only a fraction of train/dev frames for rapid hyperparameter search:
+
 ```bash
-RUN_SWEEP=1 TRAIN_FRACTION=0.20 DEV_FRACTION=0.30 EPOCHS=2 SEED_LIST=42 ./scripts/07_lazy_feature_mlp_training.sh
+RUN_SWEEP=1 BATCH_SIZE=2048 TRAIN_FRACTION=0.20 DEV_FRACTION=0.30 EPOCHS=1 SEED_LIST=42 ./scripts/07_lazy_feature_mlp_training.sh
 ```
 
 #### Full Training Sweep
+
 ```bash
 RUN_SWEEP=1 ./scripts/07_lazy_feature_mlp_training.sh
 ```
 
-> Notes:
-- Set `MANIFEST_TYPE=noisy` (default) or `MANIFEST_TYPE=clean` before the command as needed.
-- If you have normalization stats, pass `NORM_STATS_PATH=<path-to-npz>`.
-- Checkpoints are saved to `artifacts/checkpoints/` with naming pattern: `lazy_mlp_<manifest>_lr<lr>_wd<wd>_dr<dropout>_seed<seed>_*.pt`.
+Key environment variables:
+- `MANIFEST_TYPE` (`noisy` default, or `clean`)
+- `NORM_STATS_PATH` (auto-defaults to `data/generated/train/features/<manifest_type>_norm_stats.npz`)
+- `BATCH_SIZE`, `EPOCHS`, `LEARNING_RATE`, `WEIGHT_DECAY`, `DROPOUT`
+- `TRAIN_FRACTION`, `DEV_FRACTION`
+- `NUM_WORKERS` (defaults to `0` for stability)
+- `RUN_SWEEP=1` with `LR_LIST`, `WD_LIST`, `DROPOUT_LIST`, `SEED_LIST`
+
+Sweep outputs are saved under `artifacts/lazy_checkpoints/<run_name>/`.

@@ -4,20 +4,23 @@ set -euo pipefail
 # ============================================================
 # 07 - Train Lazy Feature MLP
 # ============================================================
-# This script trains the lazy stacked-feature MLP.
-# Features are computed on-the-fly from waveform + labels.
-# Architecture: 1331 -> 512 -> 256 -> 1 (binary classification)
+# This script trains the lazy frame-level MLP with on-the-fly feature
+# extraction and context stacking.
 
-# ============================================================
-# Config
-# ============================================================
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 TRAINING_SCRIPT="$PROJECT_ROOT/src/07_lazy_feature_mlp/train_lazy_mlp.py"
-DATA_ROOT="${DATA_ROOT:-$PROJECT_ROOT/data/generated}"
-MANIFEST_TYPE="${MANIFEST_TYPE:-noisy}"  # clean or noisy
-NORM_STATS_PATH="${NORM_STATS_PATH:-}"
+GENERATED_DIR="${GENERATED_DIR:-$PROJECT_ROOT/data/generated}"
+MANIFEST_TYPE="${MANIFEST_TYPE:-noisy}"
+
+# Auto-pick norm stats from step 04 outputs.
+if [[ "$MANIFEST_TYPE" == "clean" ]]; then
+  DEFAULT_NORM_STATS_PATH="$GENERATED_DIR/train/features/clean_norm_stats.npz"
+else
+  DEFAULT_NORM_STATS_PATH="$GENERATED_DIR/train/features/noisy_norm_stats.npz"
+fi
+NORM_STATS_PATH="${NORM_STATS_PATH:-$DEFAULT_NORM_STATS_PATH}"
 
 # Training hyperparameters
 BATCH_SIZE="${BATCH_SIZE:-2048}"
@@ -26,59 +29,44 @@ LEARNING_RATE="${LEARNING_RATE:-0.001}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-1e-5}"
 DROPOUT="${DROPOUT:-0.1}"
 SEED="${SEED:-42}"
-NUM_WORKERS="${NUM_WORKERS:-4}"
-SAVE_PATH="${SAVE_PATH:-$PROJECT_ROOT/artifacts/checkpoints/lazy_mlp_${MANIFEST_TYPE}.pt}"
+NUM_WORKERS="${NUM_WORKERS:-0}"
+DEVICE="${DEVICE:-auto}"
+
+# Optional data subsampling
 TRAIN_FRACTION="${TRAIN_FRACTION:-1.0}"
 DEV_FRACTION="${DEV_FRACTION:-1.0}"
-SAVE_EVERY="${SAVE_EVERY:-1}"
+
+# Output
+OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/outputs/stage2_lazy_mlp}"
 
 # Sweep mode
-RUN_SWEEP="${RUN_SWEEP:-0}"              # 1 to enable sweep mode
-SAVE_DIR="${SAVE_DIR:-$PROJECT_ROOT/artifacts/checkpoints}"
+RUN_SWEEP="${RUN_SWEEP:-0}"
+SWEEP_OUTPUT_ROOT="${SWEEP_OUTPUT_ROOT:-$PROJECT_ROOT/artifacts/lazy_checkpoints}"
 LR_LIST="${LR_LIST:-0.001,0.0003}"
 WD_LIST="${WD_LIST:-0,1e-5,1e-4}"
 DROPOUT_LIST="${DROPOUT_LIST:-0.0,0.1}"
 SEED_LIST="${SEED_LIST:-42,1337}"
 
-# ============================================================
-# Validation
-# ============================================================
 if [[ ! -f "$TRAINING_SCRIPT" ]]; then
-  echo "ERROR: Training script not found:"
-  echo "  $TRAINING_SCRIPT"
-  exit 1
-fi
-
-if [[ "$MANIFEST_TYPE" != "clean" && "$MANIFEST_TYPE" != "noisy" ]]; then
-  echo "ERROR: MANIFEST_TYPE must be clean or noisy, got: $MANIFEST_TYPE"
+  echo "ERROR: Training script not found: $TRAINING_SCRIPT"
   exit 1
 fi
 
 if [[ "$MANIFEST_TYPE" == "clean" ]]; then
-  TRAIN_MANIFEST="$DATA_ROOT/train/manifests/train_manifest.jsonl"
-  DEV_MANIFEST="$DATA_ROOT/dev/manifests/dev_manifest.jsonl"
+  TRAIN_MANIFEST="$GENERATED_DIR/train/manifests/train_manifest.jsonl"
+  DEV_MANIFEST="$GENERATED_DIR/dev/manifests/dev_manifest.jsonl"
 else
-  TRAIN_MANIFEST="$DATA_ROOT/train/manifests/train_noisy_manifest.jsonl"
-  DEV_MANIFEST="$DATA_ROOT/dev/manifests/dev_noisy_manifest.jsonl"
+  TRAIN_MANIFEST="$GENERATED_DIR/train/manifests/train_noisy_manifest.jsonl"
+  DEV_MANIFEST="$GENERATED_DIR/dev/manifests/dev_noisy_manifest.jsonl"
 fi
 
 if [[ ! -f "$TRAIN_MANIFEST" ]]; then
-  echo "ERROR: Train manifest not found:"
-  echo "  $TRAIN_MANIFEST"
-  echo "Please run data generation/noise steps first."
+  echo "ERROR: Train manifest not found: $TRAIN_MANIFEST"
   exit 1
 fi
 
 if [[ ! -f "$DEV_MANIFEST" ]]; then
-  echo "ERROR: Dev manifest not found:"
-  echo "  $DEV_MANIFEST"
-  echo "Please run data generation/noise steps first."
-  exit 1
-fi
-
-if [[ -n "$NORM_STATS_PATH" && ! -f "$NORM_STATS_PATH" ]]; then
-  echo "ERROR: NORM_STATS_PATH provided but file not found:"
-  echo "  $NORM_STATS_PATH"
+  echo "ERROR: Dev manifest not found: $DEV_MANIFEST"
   exit 1
 fi
 
@@ -87,63 +75,55 @@ run_one() {
   local wd="$2"
   local dr="$3"
   local seed="$4"
-  local save_path="$5"
+  local out_dir="$5"
 
-  mkdir -p "$(dirname "$save_path")"
+  mkdir -p "$out_dir"
   echo "----------------------------------------"
   echo "Run config"
   echo "  manifest_type=$MANIFEST_TYPE"
   echo "  lr=$lr wd=$wd dropout=$dr seed=$seed"
   echo "  train_fraction=$TRAIN_FRACTION dev_fraction=$DEV_FRACTION"
-  echo "  save_every=$SAVE_EVERY"
-  echo "  save_path=$save_path"
-  if [[ -n "$NORM_STATS_PATH" ]]; then
-    echo "  norm_stats_path=$NORM_STATS_PATH"
-  else
-    echo "  norm_stats_path=<none>"
-  fi
+  echo "  output_dir=$out_dir"
   echo "----------------------------------------"
 
-  cmd=(
-    "$PYTHON_BIN" "$TRAINING_SCRIPT"
-    --data_root "$DATA_ROOT"
-    --manifest_type "$MANIFEST_TYPE"
-    --batch_size "$BATCH_SIZE"
-    --epochs "$EPOCHS"
-    --lr "$lr"
-    --weight_decay "$wd"
-    --dropout "$dr"
-    --seed "$seed"
-    --num_workers "$NUM_WORKERS"
-    --train_fraction "$TRAIN_FRACTION"
-    --dev_fraction "$DEV_FRACTION"
-    --save_every "$SAVE_EVERY"
-    --save_path "$save_path"
-  )
-
-  if [[ -n "$NORM_STATS_PATH" ]]; then
-    cmd+=(--norm_stats_path "$NORM_STATS_PATH")
+  local norm_args=()
+  if [[ -f "$NORM_STATS_PATH" ]]; then
+    norm_args=(--norm_stats_path "$NORM_STATS_PATH")
+  else
+    echo "WARNING: norm stats not found at $NORM_STATS_PATH"
+    echo "WARNING: continuing without normalization stats"
   fi
 
-  "${cmd[@]}"
+  "$PYTHON_BIN" "$TRAINING_SCRIPT" \
+    --generated_dir "$GENERATED_DIR" \
+    --manifest_type "$MANIFEST_TYPE" \
+    --batch_size "$BATCH_SIZE" \
+    --epochs "$EPOCHS" \
+    --lr "$lr" \
+    --weight_decay "$wd" \
+    --dropout "$dr" \
+    --seed "$seed" \
+    --num_workers "$NUM_WORKERS" \
+    --device "$DEVICE" \
+    --train_subset_fraction "$TRAIN_FRACTION" \
+    --dev_subset_fraction "$DEV_FRACTION" \
+    --output_dir "$out_dir" \
+    "${norm_args[@]}"
 }
 
-# ============================================================
-# Summary
-# ============================================================
 echo "========================================"
 echo "Lazy Feature MLP Training"
 echo "========================================"
 echo "Project root: $PROJECT_ROOT"
-echo "Data root: $DATA_ROOT"
+echo "Generated dir: $GENERATED_DIR"
 echo "Manifest type: $MANIFEST_TYPE"
-echo "Norm stats path: ${NORM_STATS_PATH:-<none>}"
+echo "Norm stats path: $NORM_STATS_PATH"
 echo "Batch size: $BATCH_SIZE"
 echo "Epochs: $EPOCHS"
 echo "Number of workers: $NUM_WORKERS"
+echo "Device: $DEVICE"
 echo "Train fraction: $TRAIN_FRACTION"
 echo "Dev fraction: $DEV_FRACTION"
-echo "Save every: $SAVE_EVERY"
 echo "RUN_SWEEP: $RUN_SWEEP"
 echo "========================================"
 echo
@@ -154,13 +134,13 @@ if [[ "$RUN_SWEEP" == "1" ]]; then
   IFS=',' read -r -a DROPOUT_VALUES <<< "$DROPOUT_LIST"
   IFS=',' read -r -a SEED_VALUES <<< "$SEED_LIST"
 
-  mkdir -p "$SAVE_DIR"
+  mkdir -p "$SWEEP_OUTPUT_ROOT"
 
   total_runs=$(( ${#LR_VALUES[@]} * ${#WD_VALUES[@]} * ${#DROPOUT_VALUES[@]} * ${#SEED_VALUES[@]} ))
   run_idx=0
 
   echo "Sweep mode enabled"
-  echo "Save directory: $SAVE_DIR"
+  echo "Sweep output root: $SWEEP_OUTPUT_ROOT"
   echo "Total runs: $total_runs"
   echo
 
@@ -169,28 +149,28 @@ if [[ "$RUN_SWEEP" == "1" ]]; then
       for dr in "${DROPOUT_VALUES[@]}"; do
         for seed in "${SEED_VALUES[@]}"; do
           run_idx=$((run_idx + 1))
-          run_name="lazy_mlp_${MANIFEST_TYPE}_lr${lr}_wd${wd}_dr${dr}_seed${seed}"
-          run_save_path="$SAVE_DIR/${run_name}.pt"
+          run_name="lazy_mlp_lr${lr}_wd${wd}_dr${dr}_seed${seed}"
+          run_out_dir="$SWEEP_OUTPUT_ROOT/$run_name"
 
           echo "[$run_idx/$total_runs] Training $run_name"
-          run_one "$lr" "$wd" "$dr" "$seed" "$run_save_path"
+          run_one "$lr" "$wd" "$dr" "$seed" "$run_out_dir"
         done
       done
     done
   done
 
   echo
-  echo "Done sweep training. Checkpoints saved under: $SAVE_DIR"
+  echo "Done sweep training. Outputs saved under: $SWEEP_OUTPUT_ROOT"
 else
   echo "Single-run mode"
   echo "Learning rate: $LEARNING_RATE"
   echo "Weight decay: $WEIGHT_DECAY"
   echo "Dropout: $DROPOUT"
   echo "Seed: $SEED"
-  echo "Save path: $SAVE_PATH"
+  echo "Output dir: $OUTPUT_DIR"
   echo
 
-  run_one "$LEARNING_RATE" "$WEIGHT_DECAY" "$DROPOUT" "$SEED" "$SAVE_PATH"
+  run_one "$LEARNING_RATE" "$WEIGHT_DECAY" "$DROPOUT" "$SEED" "$OUTPUT_DIR"
 
   echo
   echo "Done training lazy feature MLP model."
