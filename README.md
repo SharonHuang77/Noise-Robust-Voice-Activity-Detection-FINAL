@@ -161,3 +161,35 @@ Key environment variables:
 - `RUN_SWEEP=1` with `LR_LIST`, `WD_LIST`, `DROPOUT_LIST`, `SEED_LIST`
 
 Sweep outputs are saved under `artifacts/lazy_checkpoints/<run_name>/`.
+
+### 10. Train Lazy Feature CRNN (CNN + RNN, no context stacking)
+
+Train a CRNN directly on per-frame sequence features (`[T, 121]`) from lazy extraction:
+
+```bash
+./scripts/08_lazy_feature_crnn_training.sh
+```
+
+#### Quick Search (with reduced data)
+
+```bash
+RUN_SWEEP=1 BATCH_SIZE=8 TRAIN_FRACTION=0.20 DEV_FRACTION=0.30 EPOCHS=1 SEED_LIST=42 ./scripts/08_lazy_feature_crnn_training.sh
+```
+
+#### Full Training Sweep
+
+```bash
+RUN_SWEEP=1 ./scripts/08_lazy_feature_crnn_training.sh
+```
+
+Key environment variables:
+- `MANIFEST_TYPE` (`noisy` default, or `clean`)
+- `NORM_STATS_PATH` (auto-defaults to `data/generated/train/features/<manifest_type>_norm_stats.npz`)
+- `BATCH_SIZE`, `EPOCHS`, `LEARNING_RATE`, `WEIGHT_DECAY`, `DROPOUT`
+- `CONV_CHANNELS` (default `64,128`), `CONV_KERNEL_SIZE` (default `5`)
+- `RNN_HIDDEN_SIZE` (default `128`), `RNN_LAYERS` (default `1`), `RNN_BIDIRECTIONAL` (`1` or `0`)
+- `TRAIN_FRACTION`, `DEV_FRACTION`
+- `NUM_WORKERS` (defaults to `0` for stability)
+- `RUN_SWEEP=1` with `LR_LIST`, `WD_LIST`, `DROPOUT_LIST`, `SEED_LIST`
+
+Sweep outputs are saved under `artifacts/lazy_crnn_checkpoints/`.
