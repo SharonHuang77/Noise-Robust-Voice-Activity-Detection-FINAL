@@ -50,7 +50,7 @@ Step 5.1: Create Index Files
 Scans LibriSpeech and MUSAN directories to create index files that list all audio files and their metadata.
 
 ```bash
-python src/01_indexing/make_indexes.py \
+python3 src/01_indexing/make_indexes.py \
   --librispeech_root data/raw/LibriSpeech \
   --musan_root data/raw/musan \
   --out_dir data/indexes \
@@ -71,6 +71,125 @@ Mixes clean speech segments with noise from MUSAN at various SNR levels to creat
 
 ### 6. Extract Features
 Extracts log-mel + delta + delta-delta + log-energy features from the generated audio files for model training and evaluation.
+
+By default, this extracts **noisy** features:
 ```bash
 ./scripts/04_extract_features.sh
 ```
+
+For baseline training, you also need **clean** features:
+```bash
+MANIFEST_TYPE=clean ./scripts/04_extract_features.sh
+```
+
+This will create `train_clean_features_manifest.jsonl` (plus dev/test versions) needed for Step 7.
+
+### 7. Train Baseline MLP
+Trains a baseline MLP model for frame-level voice activity detection on clean LibriSpeech speech.
+- Architecture: 1331 → 512 → 256 → 1 (binary classification)
+- Features: 1331-dim stacked (5 left + 121 center + 5 right frames)
+- Default: 5 epochs, batch size 2048, learning rate 0.001
+**The current training is using Optional: Faster Tuning**
+
+```bash
+RUN_SWEEP=1 ./scripts/05_baseline_training.sh
+```
+#### Optional: Faster Tuning (Quick Search)
+Use only a fraction of train/dev frames for rapid hyperparameter exploration:
+```bash
+RUN_SWEEP=1 TRAIN_FRACTION=0.20 DEV_FRACTION=0.30 EPOCHS=2 SEED_LIST=42 ./scripts/05_baseline_training.sh
+```
+
+#### Optional: custom sweep in one command
+```bash
+RUN_SWEEP=1 LR_LIST=0.001,0.0003 WD_LIST=0,1e-5,1e-4 DROPOUT_LIST=0.0,0.1 SEED_LIST=42,1337 EPOCHS=5 BATCH_SIZE=2048 ./scripts/05_baseline_training.sh
+```
+
+> Notes:
+- `TRAIN_FRACTION` and `DEV_FRACTION` must be in `(0, 1]`.
+- Use reduced fractions for quick search, then retrain top settings with `TRAIN_FRACTION=1.0 DEV_FRACTION=1.0`.
+
+### 8. Train Offline MLP with Noisy Data
+Trains an offline MLP model using noisy speech features to improve robustness in real-world conditions.
+- Architecture: 1331 → 512 → 256 → 1 (binary classification)
+- Features: 1331-dim stacked from noisy audio (5 left + 121 center + 5 right frames)
+- Default: 5 epochs, batch size 2048, learning rate 0.001
+
+**Prerequisite:** Noisy features must be extracted first (Step 6).
+
+#### Quick Search (with reduced data)
+Use only a fraction of train/dev frames for rapid hyperparameter search:
+```bash
+RUN_SWEEP=1 TRAIN_FRACTION=0.20 DEV_FRACTION=0.30 EPOCHS=2 SEED_LIST=42 ./scripts/06_noisy_offline_mlp_training.sh
+```
+
+#### Full Training Sweep
+```bash
+RUN_SWEEP=1 ./scripts/06_noisy_offline_mlp_training.sh
+```
+
+> Notes:
+- Use the same `SEED_LIST`, `TRAIN_FRACTION`, `DEV_FRACTION`, and `EPOCHS` as baseline for fair comparison.
+- Checkpoints are saved to `artifacts/checkpoints/` with naming pattern: `noisy_mlp_lr<lr>_wd<wd>_dr<dropout>_seed<seed>.pt`.
+
+### 9. Train Lazy Feature MLP
+
+Train the lazy feature model (on-the-fly frame extraction + context stacking) with:
+
+```bash
+./scripts/07_lazy_feature_mlp_training.sh
+```
+
+#### Quick Search (with reduced data)
+
+```bash
+RUN_SWEEP=1 BATCH_SIZE=2048 TRAIN_FRACTION=0.20 DEV_FRACTION=0.30 EPOCHS=1 SEED_LIST=42 ./scripts/07_lazy_feature_mlp_training.sh
+```
+
+#### Full Training Sweep
+
+```bash
+RUN_SWEEP=1 ./scripts/07_lazy_feature_mlp_training.sh
+```
+
+Key environment variables:
+- `MANIFEST_TYPE` (`noisy` default, or `clean`)
+- `NORM_STATS_PATH` (auto-defaults to `data/generated/train/features/<manifest_type>_norm_stats.npz`)
+- `BATCH_SIZE`, `EPOCHS`, `LEARNING_RATE`, `WEIGHT_DECAY`, `DROPOUT`
+- `TRAIN_FRACTION`, `DEV_FRACTION`
+- `NUM_WORKERS` (defaults to `0` for stability)
+- `RUN_SWEEP=1` with `LR_LIST`, `WD_LIST`, `DROPOUT_LIST`, `SEED_LIST`
+
+Sweep outputs are saved under `artifacts/lazy_checkpoints/<run_name>/`.
+
+### 10. Train Lazy Feature CRNN (CNN + RNN, no context stacking)
+
+Train a CRNN directly on per-frame sequence features (`[T, 121]`) from lazy extraction:
+
+```bash
+./scripts/08_lazy_feature_crnn_training.sh
+```
+
+#### Quick Search (with reduced data)
+
+```bash
+RUN_SWEEP=1 BATCH_SIZE=8 TRAIN_FRACTION=0.20 DEV_FRACTION=0.30 EPOCHS=1 SEED_LIST=42 ./scripts/08_lazy_feature_crnn_training.sh
+```
+
+#### Full Training Sweep
+
+```bash
+RUN_SWEEP=1 ./scripts/08_lazy_feature_crnn_training.sh
+```
+
+Key environment variables:
+- `MANIFEST_TYPE` (`noisy` default, or `clean`)
+- `NORM_STATS_PATH` (auto-defaults to `data/generated/train/features/<manifest_type>_norm_stats.npz`)
+- `BATCH_SIZE`, `EPOCHS`, `LEARNING_RATE`, `WEIGHT_DECAY`, `DROPOUT`
+- `CONV_CHANNELS` (default `64,128`), `CONV_KERNEL_SIZE` (default `5`)
+- `RNN_HIDDEN_SIZE` (default `128`), `RNN_LAYERS` (default `1`), `RNN_BIDIRECTIONAL` (`1` or `0`)
+- `TRAIN_FRACTION`, `DEV_FRACTION`
+- `NUM_WORKERS` (defaults to `0` for stability)
+- `RUN_SWEEP=1` with `LR_LIST`, `WD_LIST`, `DROPOUT_LIST`, `SEED_LIST`
+
+Sweep outputs are saved under `artifacts/lazy_crnn_checkpoints/`.
